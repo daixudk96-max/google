@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import FileUpload from './components/FileUpload';
 import ResultDisplay from './components/ResultDisplay';
-import { splitTextIntoChunks, analyzeChunk, stitchResults, generateMindMap } from './services/geminiService';
-import { ChunkAnalysisResult, ProcessingState, Segment, MindMapNode } from './types';
-import { Loader2, BrainCircuit, AlertCircle } from 'lucide-react';
+import { splitTextIntoChunks, analyzeChunk, stitchResults } from './services/geminiService';
+import { ChunkAnalysisResult, ProcessingState, Segment, SEGMENT_MASTER_SYSTEM_PROMPT } from './types';
+import { Loader2, BrainCircuit, AlertCircle, Settings2, Sparkles, Copy } from 'lucide-react';
 
 const App: React.FC = () => {
   const [processingState, setProcessingState] = useState<ProcessingState>({
@@ -12,18 +12,21 @@ const App: React.FC = () => {
     totalChunks: 0,
   });
   const [finalSegments, setFinalSegments] = useState<Segment[]>([]);
-  const [mindMapData, setMindMapData] = useState<MindMapNode | null>(null);
   const [fileName, setFileName] = useState<string>('');
+  
+  // AI Configuration State
+  const [showSettings, setShowSettings] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState(SEGMENT_MASTER_SYSTEM_PROMPT);
+  const [thinkingBudget, setThinkingBudget] = useState(0); // Default 0 (Disabled)
 
   const handleFileUpload = async (content: string, name: string) => {
     setFileName(name);
     setFinalSegments([]); 
-    setMindMapData(null);
     setProcessingState({ status: 'chunking', currentChunk: 0, totalChunks: 0, message: '正在切片文本...' });
 
     try {
-      // 1. Chunking (10k chars per chunk as requested)
-      const chunks = splitTextIntoChunks(content, 10000);
+      // 1. Chunking (2400 chars per chunk for higher granularity)
+      const chunks = splitTextIntoChunks(content, 2400);
       setProcessingState({ 
         status: 'analyzing', 
         currentChunk: 0, 
@@ -39,17 +42,19 @@ const App: React.FC = () => {
         setProcessingState(prev => ({
           ...prev,
           currentChunk: i + 1,
-          message: `正在进行深度解析切片 ${i + 1} / ${chunks.length} (教程模式，耗时较长请耐心等待)...`
+          message: `正在进行深度解析切片 ${i + 1} / ${chunks.length} ${thinkingBudget > 0 ? '(深度思考中...)' : ''}...`
         }));
 
-        const result = await analyzeChunk(chunks[i], i, previousSummaryContext);
+        // Pass systemPrompt and thinkingBudget from state
+        const result = await analyzeChunk(chunks[i], i, systemPrompt, thinkingBudget, previousSummaryContext);
         results.push(result);
 
         // Update context for next iteration
         if (result.segments.length > 0) {
            const lastSeg = result.segments[result.segments.length - 1];
            if (lastSeg.sub_segments.length > 0) {
-             previousSummaryContext = lastSeg.sub_segments[lastSeg.sub_segments.length - 1].summary;
+             const lastSub = lastSeg.sub_segments[lastSeg.sub_segments.length - 1];
+             previousSummaryContext = lastSub.overview;
            } else {
              previousSummaryContext = lastSeg.main_title;
            }
@@ -61,11 +66,6 @@ const App: React.FC = () => {
       const stitchedSegments = stitchResults(results);
       setFinalSegments(stitchedSegments);
 
-      // 4. Mind Mapping
-      setProcessingState(prev => ({ ...prev, status: 'mindmapping', message: '正在绘制逻辑思维导图...' }));
-      const mindMap = await generateMindMap(stitchedSegments);
-      setMindMapData(mindMap);
-
       setProcessingState({ status: 'complete', currentChunk: chunks.length, totalChunks: chunks.length, message: '完成' });
 
     } catch (error) {
@@ -74,9 +74,14 @@ const App: React.FC = () => {
         status: 'error', 
         currentChunk: 0, 
         totalChunks: 0, 
-        message: '处理过程中发生错误，请检查 API Key 或重试。' 
+        message: '处理过程中发生错误，请检查 API Key 或网络。' 
       });
     }
+  };
+
+  const copyPrompt = () => {
+    navigator.clipboard.writeText(systemPrompt);
+    alert('系统提示词已复制！你可以将其粘贴到 Google AI Studio 或 Gemini Gem 中。');
   };
 
   return (
@@ -89,11 +94,20 @@ const App: React.FC = () => {
               <BrainCircuit className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600">
-              分段总结大师 (教程版)
+              Gemini 深度脑图工坊
             </h1>
           </div>
-          <div className="text-sm text-slate-500 hidden sm:block font-medium">
-            Powered by Gemini 1.5 Pro
+          <div className="flex items-center gap-3">
+             <button 
+               onClick={() => setShowSettings(!showSettings)}
+               className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border ${showSettings ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
+             >
+               <Settings2 size={16} />
+               Gem 配置
+             </button>
+             <div className="text-sm text-slate-500 hidden sm:block font-medium pl-3 border-l border-slate-200">
+              Gemini 3 Flash
+             </div>
           </div>
         </div>
       </header>
@@ -103,13 +117,77 @@ const App: React.FC = () => {
         
         {/* Intro / Empty State */}
         {processingState.status === 'idle' && (
-          <div className="text-center mb-12 max-w-3xl mx-auto animate-fade-in-up">
-            <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-6">
-              长文本 <span className="text-indigo-600">自学教程</span> 生成器
+          <div className="text-center mb-10 max-w-3xl mx-auto animate-fade-in-up">
+            <h2 className="text-4xl font-extrabold text-slate-900 tracking-tight mb-4">
+              打造你的专属 <span className="text-indigo-600">AI 知识应用</span>
             </h2>
-            <p className="text-xl text-slate-600 mb-8 leading-relaxed">
-              上传数万字的会议记录、课程讲稿或文档。我们将为您生成<strong className="text-indigo-700">极度详尽</strong>的自学教材，并自动绘制全篇<strong className="text-indigo-700">思维导图</strong>。
+            <p className="text-lg text-slate-600 leading-relaxed">
+              上传长文档，自动执行深度拆解工作流。支持自定义 Gem 人设与思维链预算。
             </p>
+          </div>
+        )}
+
+        {/* AI Configuration Panel */}
+        {showSettings && processingState.status === 'idle' && (
+          <div className="max-w-4xl mx-auto mb-10 bg-white rounded-2xl shadow-lg border border-indigo-100 overflow-hidden animate-in slide-in-from-top-4 fade-in duration-300">
+             <div className="bg-indigo-50/50 px-6 py-4 border-b border-indigo-100 flex justify-between items-center">
+               <h3 className="font-bold text-indigo-900 flex items-center gap-2">
+                 <Sparkles size={18} className="text-indigo-600" />
+                 Gem 核心配置
+               </h3>
+               <button onClick={copyPrompt} className="text-xs flex items-center gap-1 text-indigo-600 hover:text-indigo-800 hover:underline">
+                 <Copy size={12} /> 复制提示词
+               </button>
+             </div>
+             
+             <div className="p-6 grid gap-6 md:grid-cols-2">
+                <div className="space-y-3">
+                   <label className="block text-sm font-medium text-slate-700">
+                     System Prompt (Gem 人设)
+                   </label>
+                   <p className="text-xs text-slate-500 mb-2">定义 AI 如何拆解、归纳和输出思维导图结构。</p>
+                   <textarea 
+                     value={systemPrompt}
+                     onChange={(e) => setSystemPrompt(e.target.value)}
+                     className="w-full h-64 p-3 text-sm bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono resize-none leading-relaxed"
+                   />
+                </div>
+                
+                <div className="space-y-6">
+                   <div>
+                     <label className="block text-sm font-medium text-slate-700 mb-1">
+                       Thinking Budget (思考预算)
+                     </label>
+                     <div className="flex items-center gap-4 mb-2">
+                        <span className="text-2xl font-bold text-indigo-600">{thinkingBudget}</span>
+                        <span className="text-xs text-slate-500">Tokens</span>
+                     </div>
+                     <input 
+                       type="range" 
+                       min="0" 
+                       max="8192" 
+                       step="1024" 
+                       value={thinkingBudget}
+                       onChange={(e) => setThinkingBudget(Number(e.target.value))}
+                       className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-indigo-600"
+                     />
+                     <p className="text-xs text-slate-500 mt-2">
+                       {thinkingBudget === 0 
+                         ? '已关闭。适合快速生成，响应速度最快。' 
+                         : '已开启深度思考。AI 将在生成回答前进行逻辑推理 (Gemini 3.0 特性)，会增加等待时间但提升准确率。'}
+                     </p>
+                   </div>
+                   
+                   <div className="bg-amber-50 border border-amber-100 p-4 rounded-lg">
+                      <h4 className="text-sm font-bold text-amber-800 mb-1">提示技巧</h4>
+                      <ul className="text-xs text-amber-700 space-y-1 list-disc pl-4">
+                        <li>保留 <b>NO DUNHAO</b> 指令以确保导图格式正确。</li>
+                        <li>保留 <b>Content Node 格式规范</b> 以确保渲染器能识别。</li>
+                        <li>增加“思考预算”可显著提升复杂逻辑归纳的效果。</li>
+                      </ul>
+                   </div>
+                </div>
+             </div>
           </div>
         )}
 
@@ -124,16 +202,12 @@ const App: React.FC = () => {
             <div className="relative w-24 h-24 mx-auto mb-8">
               <div className="absolute inset-0 border-[6px] border-indigo-50 rounded-full"></div>
               <div className="absolute inset-0 border-[6px] border-indigo-600 rounded-full border-t-transparent animate-spin"></div>
-              {processingState.status === 'mindmapping' ? (
-                <BrainCircuit className="absolute inset-0 m-auto w-10 h-10 text-indigo-600 animate-pulse" />
-              ) : (
-                <Loader2 className="absolute inset-0 m-auto w-10 h-10 text-indigo-600" />
-              )}
+              <Loader2 className="absolute inset-0 m-auto w-10 h-10 text-indigo-600" />
             </div>
             
             <h3 className="text-2xl font-bold text-slate-800 mb-3">{processingState.message}</h3>
             
-            {processingState.totalChunks > 0 && processingState.status !== 'mindmapping' && (
+            {processingState.totalChunks > 0 && (
               <div className="w-full bg-gray-100 rounded-full h-3 mt-6 overflow-hidden">
                 <div 
                   className="bg-gradient-to-r from-indigo-500 to-violet-600 h-3 rounded-full transition-all duration-700 ease-out" 
@@ -143,9 +217,7 @@ const App: React.FC = () => {
             )}
             
             <p className="text-base text-slate-500 mt-6 font-medium">
-              {processingState.status === 'mindmapping' 
-                ? '正在根据全篇内容构建知识图谱，请稍候...' 
-                : 'AI 正在深度阅读并编写教程，这可能需要几分钟。'}
+              AI 正在执行工作流：{thinkingBudget > 0 ? '深度推理' : '快速分析'} -> 逻辑拆解 -> 结构重组
             </p>
           </div>
         )}
@@ -176,7 +248,6 @@ const App: React.FC = () => {
                     setProcessingState({ status: 'idle', currentChunk: 0, totalChunks: 0 });
                     setFinalSegments([]);
                     setFileName('');
-                    setMindMapData(null);
                   }}
                   className="px-8 py-3 bg-white border border-indigo-200 text-indigo-600 rounded-full hover:bg-indigo-50 font-bold shadow-sm transition-all hover:shadow-md flex items-center gap-2"
                >
@@ -184,7 +255,7 @@ const App: React.FC = () => {
                  分析新文件
                </button>
             </div>
-            <ResultDisplay segments={finalSegments} mindMapData={mindMapData} fileName={fileName} />
+            <ResultDisplay segments={finalSegments} fileName={fileName} />
           </div>
         )}
       </main>

@@ -1,182 +1,227 @@
-import React, { useState } from 'react';
-import { Segment, SubSegment, MindMapNode } from '../types';
-import { FileText, Clock, Tag, CheckCircle2, ListTree, BookOpen } from 'lucide-react';
-import MindMapRenderer from './MindMapRenderer';
+import React from 'react';
+import { Segment } from '../types';
+import { FileText, Download, Share2 } from 'lucide-react';
+import UnifiedMapRenderer from './UnifiedMapRenderer';
 
 interface ResultDisplayProps {
   segments: Segment[];
-  mindMapData: MindMapNode | null;
   fileName: string;
 }
 
-const SubSegmentCard: React.FC<{ sub: SubSegment; index: number }> = ({ sub, index }) => (
-  <div className="ml-4 md:ml-8 mt-6 p-6 bg-white rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-    <div className="flex items-start gap-4">
-      <div className="flex-shrink-0 mt-1">
-        <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm ring-2 ring-indigo-50">
-          {index + 1}
-        </div>
-      </div>
-      <div className="flex-grow space-y-4">
-        <h4 className="text-xl font-bold text-slate-800">{sub.title}</h4>
-        
-        <div className="prose prose-slate max-w-none text-slate-700 leading-relaxed bg-slate-50 p-4 rounded-lg border-l-4 border-indigo-200">
-           {/* Allow basic formatting if API returns newlines */}
-           {sub.summary.split('\n').map((line, i) => (
-             <p key={i} className={line.trim() === '' ? 'h-2' : 'mb-2'}>{line}</p>
-           ))}
-        </div>
-        
-        {sub.key_points && sub.key_points.length > 0 && (
-          <div className="bg-green-50/50 p-4 rounded-lg border border-green-100">
-             <h5 className="text-sm font-bold text-green-700 uppercase tracking-wider mb-3 flex items-center gap-2">
-               <CheckCircle2 className="w-4 h-4" /> 核心知识点
-             </h5>
-             <ul className="grid grid-cols-1 gap-3">
-               {sub.key_points.map((kp, idx) => (
-                 <li key={idx} className="flex items-start gap-2 text-slate-800 text-sm md:text-base font-medium">
-                   <span className="text-green-500 mt-1">•</span>
-                   <span>{kp}</span>
-                 </li>
-               ))}
-             </ul>
-          </div>
-        )}
-
-        {sub.original_snippet && (
-          <div className="text-sm text-slate-500 italic mt-2">
-            <span className="font-semibold text-slate-400">原文摘录：</span> "{sub.original_snippet}"
-          </div>
-        )}
-      </div>
-    </div>
-  </div>
-);
-
-const SegmentCard: React.FC<{ segment: Segment; index: number }> = ({ segment, index }) => (
-  <div className="mb-12 relative pl-6 md:pl-0">
-    {/* Timeline Connector for Desktop */}
-    <div className="hidden md:block absolute left-[27px] top-10 bottom-[-48px] w-0.5 bg-indigo-100 last:hidden"></div>
-
-    <div className="flex flex-col md:flex-row gap-4 md:gap-8 items-start">
-      {/* Segment Number Badge */}
-      <div className="flex-shrink-0 z-10 hidden md:flex flex-col items-center">
-        <div className="w-14 h-14 rounded-full bg-indigo-600 text-white flex items-center justify-center text-xl font-bold shadow-xl ring-4 ring-indigo-50">
-          {index + 1}
-        </div>
-      </div>
-
-      <div className="flex-grow w-full">
-        {/* Main Segment Header */}
-        <div className="bg-gradient-to-r from-indigo-700 to-violet-800 rounded-2xl p-6 shadow-lg text-white mb-6 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-8 opacity-10 transform translate-x-4 -translate-y-4">
-             <BookOpen size={120} />
-          </div>
-          <div className="relative z-10">
-            <div className="flex flex-wrap justify-between items-start gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-2 opacity-90 text-sm font-medium uppercase tracking-wide">
-                  <Tag className="w-4 h-4" />
-                  <span>Tutorial Section {index + 1}</span>
-                </div>
-                <h3 className="text-3xl font-extrabold tracking-tight leading-tight">{segment.main_title}</h3>
-              </div>
-              {(segment.timestamp_start || segment.timestamp_end) && (
-                <div className="flex items-center gap-2 bg-white/20 px-4 py-2 rounded-lg text-sm font-mono backdrop-blur-sm shadow-sm border border-white/10">
-                  <Clock className="w-4 h-4" />
-                  <span>
-                    {segment.timestamp_start || '00:00:00'} — {segment.timestamp_end || 'End'}
-                  </span>
-                </div>
-              )}
-            </div>
-            <div className="mt-6 pt-4 border-t border-white/20 text-indigo-100 text-sm flex items-center gap-2">
-              <span className="font-semibold text-indigo-200 bg-indigo-900/30 px-2 py-1 rounded">分段依据</span> 
-              <span>{segment.segmentation_reason}</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Sub-segments */}
-        <div className="space-y-6">
-          {segment.sub_segments.map((sub, idx) => (
-            <SubSegmentCard key={`${segment.id}-sub-${idx}`} sub={sub} index={idx} />
-          ))}
-        </div>
-      </div>
-    </div>
-  </div>
-);
-
-const ResultDisplay: React.FC<ResultDisplayProps> = ({ segments, mindMapData, fileName }) => {
-  const [activeTab, setActiveTab] = useState<'mindmap' | 'details'>('mindmap');
-
+const ResultDisplay: React.FC<ResultDisplayProps> = ({ segments, fileName }) => {
   if (!segments || segments.length === 0) return null;
 
+  const downloadMarkdown = () => {
+    let content = `# ${fileName} - 详细教程\n\n`;
+    segments.forEach((seg, i) => {
+      content += `## ${i + 1}. ${seg.main_title}\n`;
+      if (seg.timestamp_start) content += `> 时间戳: ${seg.timestamp_start} - ${seg.timestamp_end}\n`;
+      content += `\n`;
+      
+      seg.sub_segments.forEach(sub => {
+        content += `### ${sub.title}\n`;
+        content += `*${sub.overview}*\n\n`;
+        
+        sub.content_nodes.forEach(node => {
+          content += `#### ${node.heading}\n`;
+          content += `${node.text}\n\n`;
+        });
+
+        if (sub.key_points.length > 0) {
+          content += `**核心要点**:\n`;
+          sub.key_points.forEach(kp => content += `- ${kp}\n`);
+          content += `\n`;
+        }
+        if (sub.original_snippet) {
+          content += `> 原文: ${sub.original_snippet}\n\n`;
+        }
+        content += `\n`;
+      });
+      content += `---\n\n`;
+    });
+
+    const blob = new Blob([content], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileName}_Tutorial.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
+  const escapeXml = (unsafe: string) => {
+    return unsafe.replace(/[<>&'"]/g, (c) => {
+      switch (c) {
+        case '<': return '&lt;';
+        case '>': return '&gt;';
+        case '&': return '&amp;';
+        case '\'': return '&apos;';
+        case '"': return '&quot;';
+        default: return c;
+      }
+    });
+  };
+
+  // Helper to build recursive OPML structure from indented text
+  const buildOpmlFromText = (text: string) => {
+    const lines = text.split('\n');
+    
+    // Tree Node Structure
+    interface OpmlNode {
+        text: string;
+        children: OpmlNode[];
+        note?: string;
+    }
+
+    const roots: OpmlNode[] = [];
+    // Stack tracks: { node, indentLevel }
+    const stack: { node: OpmlNode; indent: number }[] = [];
+
+    lines.forEach(line => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        
+        // Calculate indentation (number of spaces)
+        const indent = line.search(/\S|$/);
+        
+        // Check if it's a list item (- or • or *)
+        const isListItem = /^[-\u2022*]/.test(trimmed);
+        
+        // CLEANUP: Remove the bullet point AND following spaces for the final text
+        // This ensures XMind/MindNode gets "Text" not "- Text"
+        const content = trimmed.replace(/^[-\u2022*]\s*/, '').trim();
+
+        if (isListItem) {
+            const newNode: OpmlNode = { text: content, children: [] };
+            
+            // Logic: Find the parent by looking at the stack.
+            // Pop items from stack that are deeper or same level as current indent
+            // (Because if indent is <= previous, we are back up the tree or at a sibling)
+            while (stack.length > 0 && indent <= stack[stack.length - 1].indent) {
+                stack.pop();
+            }
+
+            if (stack.length === 0) {
+                // Top level node
+                roots.push(newNode);
+            } else {
+                // Child of the current top of stack
+                stack[stack.length - 1].node.children.push(newNode);
+            }
+            // Push current node as the active parent for subsequent deeper lines
+            stack.push({ node: newNode, indent });
+        } else {
+            // It's not a list item, treat as a NOTE for the node currently at top of stack
+            if (stack.length > 0) {
+                 const current = stack[stack.length - 1].node;
+                 current.note = current.note ? current.note + '\n' + content : content;
+             }
+        }
+    });
+
+    // Recursive function to generate XML
+    const nodesToXml = (nodes: OpmlNode[], indentStr: string): string => {
+        let xml = '';
+        nodes.forEach(node => {
+            const noteAttr = node.note ? ` _note="${escapeXml(node.note)}"` : '';
+            if (node.children.length > 0) {
+                // Has children
+                xml += `${indentStr}<outline text="${escapeXml(node.text)}"${noteAttr}>\n`;
+                xml += nodesToXml(node.children, indentStr + '  ');
+                xml += `${indentStr}</outline>\n`;
+            } else {
+                // Leaf node
+                xml += `${indentStr}<outline text="${escapeXml(node.text)}"${noteAttr} />\n`;
+            }
+        });
+        return xml;
+    };
+
+    return nodesToXml(roots, '        ');
+  };
+
+  const downloadOPML = () => {
+    let opml = `<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head>
+    <title>${escapeXml(fileName)} - 知识导图</title>
+  </head>
+  <body>
+`;
+    segments.forEach(seg => {
+      opml += `    <outline text="${escapeXml(seg.main_title)}" >\n`;
+      seg.sub_segments.forEach(sub => {
+        // Sub-segment is a node
+        opml += `      <outline text="${escapeXml(sub.title)}" _note="${escapeXml(sub.overview)}">\n`;
+        
+        // 1. Content Nodes (The real tree)
+        sub.content_nodes.forEach(node => {
+           opml += `        <outline text="${escapeXml(node.heading)}">\n`;
+           // Use the tree parser here to convert indented text to nested outline
+           opml += buildOpmlFromText(node.text);
+           opml += `        </outline>\n`;
+        });
+
+        // 2. Key Points
+        if (sub.key_points.length > 0) {
+           opml += `        <outline text="核心要点">\n`;
+           sub.key_points.forEach(kp => {
+             opml += `          <outline text="${escapeXml(kp)}" />\n`;
+           });
+           opml += `        </outline>\n`;
+        }
+        
+        opml += `      </outline>\n`;
+      });
+      opml += `    </outline>\n`;
+    });
+
+    opml += `  </body>\n</opml>`;
+
+    const blob = new Blob([opml], { type: 'text/x-opml' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${fileName}_MindMap.opml`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  };
+
   return (
-    <div className="w-full max-w-6xl mx-auto animate-fade-in">
-      <div className="flex flex-col md:flex-row items-center justify-between mb-8 pb-4 border-b border-gray-200 gap-4">
+    <div className="w-full max-w-6xl mx-auto animate-fade-in pb-20">
+      <div className="flex flex-col md:flex-row items-center justify-between mb-8 pb-4 border-b border-gray-200 gap-4 sticky top-16 bg-slate-50/95 backdrop-blur z-20 pt-4">
         <div className="flex items-center gap-3">
           <FileText className="w-8 h-8 text-indigo-600" />
           <div>
-             <h2 className="text-2xl font-bold text-gray-800 leading-none">
-              <span className="text-indigo-600">自学教程:</span> {fileName}
+             <h2 className="text-2xl font-bold text-gray-800 leading-none truncate max-w-md">
+              {fileName}
             </h2>
-            <p className="text-sm text-gray-500 mt-1">共 {segments.length} 个主要章节 • 已生成思维导图</p>
+            <p className="text-sm text-gray-500 mt-1">深度自学教程 • 共 {segments.length} 章节</p>
           </div>
         </div>
         
-        {/* Tab Switcher */}
-        <div className="flex bg-gray-100 p-1 rounded-xl">
+        <div className="flex gap-3">
           <button
-            onClick={() => setActiveTab('mindmap')}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-              activeTab === 'mindmap' 
-                ? 'bg-white text-indigo-600 shadow-md ring-1 ring-black/5' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
+            onClick={downloadMarkdown}
+            className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-300 text-slate-700 rounded-lg hover:bg-slate-50 hover:text-indigo-600 font-medium transition-all shadow-sm"
           >
-            <ListTree className="w-4 h-4" />
-            思维导图
+            <Download size={16} />
+            导出 Markdown
           </button>
           <button
-            onClick={() => setActiveTab('details')}
-            className={`flex items-center gap-2 px-6 py-2.5 rounded-lg text-sm font-bold transition-all ${
-              activeTab === 'details' 
-                ? 'bg-white text-indigo-600 shadow-md ring-1 ring-black/5' 
-                : 'text-gray-500 hover:text-gray-700'
-            }`}
+            onClick={downloadOPML}
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium transition-all shadow-md shadow-indigo-200"
           >
-            <BookOpen className="w-4 h-4" />
-            详细内容
+            <Share2 size={16} />
+            导出脑图 (OPML)
           </button>
         </div>
       </div>
 
-      <div className="min-h-[600px]">
-        {activeTab === 'mindmap' ? (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-             <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
-                <h3 className="text-lg font-bold text-slate-700 mb-6 flex items-center gap-2">
-                   <ListTree className="text-indigo-500" /> 
-                   全篇逻辑思维导图
-                </h3>
-                <MindMapRenderer data={mindMapData} />
-             </div>
-          </div>
-        ) : (
-          <div className="relative animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {segments.map((seg, idx) => (
-              <SegmentCard key={seg.id || idx} segment={seg} index={idx} />
-            ))}
-            
-            <div className="mt-12 p-8 bg-indigo-50 rounded-2xl border border-indigo-100 text-center text-indigo-800">
-              <BookOpen className="w-8 h-8 mx-auto mb-3 text-indigo-400" />
-              <p className="font-medium text-lg">教程结束</p>
-              <p className="text-sm mt-2 opacity-70">由 Gemini 分段总结大师生成</p>
-            </div>
-          </div>
-        )}
+      <div className="bg-white rounded-3xl shadow-xl border border-slate-200 min-h-[600px] overflow-hidden">
+        <UnifiedMapRenderer segments={segments} />
       </div>
     </div>
   );
