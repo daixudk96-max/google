@@ -17,7 +17,7 @@ const COLOR_PALETTES = [
 ];
 
 const FormattedText: React.FC<{ text: string }> = ({ text }) => {
-  // Strip bold markdown just in case
+  // Strip bold markdown just in case to avoid double styling
   const cleanText = text.replace(/\*\*/g, '');
   
   const lines = cleanText.split('\n').filter(line => line.trim() !== '');
@@ -27,39 +27,93 @@ const FormattedText: React.FC<{ text: string }> = ({ text }) => {
 
   if (isListLike) {
     return (
-      <ul className="space-y-1.5 list-none">
+      <div className="flex flex-col">
         {lines.map((line, idx) => {
-           // Calculate indentation level roughly based on spaces
-           const leadingSpaces = line.search(/\S|$/);
-           const indentClass = leadingSpaces >= 2 ? 'ml-6 border-l-2 border-indigo-100 pl-2' : '';
+           // Calculate indentation level precisely based on spaces
+           // Assuming 2 spaces = 1 level as per System Prompt instructions
+           const spaceCount = line.search(/\S|$/);
+           const level = Math.floor(spaceCount / 2);
+           
            const content = line.trim().replace(/^[-•]\s+/, '');
            
+           // VISUAL HIERARCHY LOGIC - UPDATED FONT SIZES
+           // Level 0: Main Concept. XL, bold.
+           // Level 1: Sub Concept / Explanation. LG, medium.
+           // Level 2: Detail / Nuance. Base (standard).
+
+           if (level === 0) {
+             return (
+               <div key={idx} className="flex gap-3 items-start mt-5 mb-3 first:mt-0 relative group">
+                 <div className="mt-3 w-3 h-3 bg-indigo-600 rounded-full shrink-0 shadow-sm z-10" />
+                 <span className="font-bold text-slate-800 text-xl leading-snug">{content}</span>
+               </div>
+             );
+           }
+           
+           // Precise indentation calculation
+           // Increased base indent to match larger fonts
+           const baseIndentRem = 2.0; 
+           const extraIndentRem = (level - 1) * 1.5;
+           const totalIndentRem = baseIndentRem + extraIndentRem;
+
            return (
-             <li key={idx} className={`flex gap-2 items-start text-slate-700 leading-7 ${indentClass}`}>
-               <span className={`mt-2.5 w-1.5 h-1.5 rounded-full shrink-0 ${leadingSpaces >= 2 ? 'bg-slate-300 w-1 h-1' : 'bg-indigo-400'}`}></span>
-               <span>{content}</span>
-             </li>
+             <div 
+               key={idx} 
+               className="relative flex gap-3 items-start mt-2"
+               style={{ paddingLeft: `${totalIndentRem}rem` }}
+             >
+               {/* Visual Guide Line: Vertical line connecting from parent area down to this item */}
+               <div 
+                  className="absolute border-l-2 border-slate-200/60" 
+                  style={{ 
+                    left: `${totalIndentRem - 1}rem`, 
+                    top: '-0.5rem', 
+                    bottom: '0.8rem',
+                    width: '2px'
+                  }} 
+               />
+               
+               {/* Horizontal Connector */}
+               <div 
+                 className="absolute border-t-2 border-slate-200/60"
+                 style={{ 
+                    left: `${totalIndentRem - 1}rem`, 
+                    top: '0.9rem', 
+                    width: '0.8rem' 
+                 }}
+               />
+
+               {/* Bullet Point */}
+               <span 
+                 className={`mt-3 shrink-0 rounded-full shadow-sm z-10 ${level === 1 ? 'w-2 h-2 bg-slate-500' : 'w-1.5 h-1.5 bg-slate-400'}`} 
+               />
+               
+               {/* Text Content - Increased sizes */}
+               <span className={`leading-relaxed ${level === 1 ? 'text-slate-700 font-medium text-lg' : 'text-slate-600 text-base'}`}>
+                 {content}
+               </span>
+             </div>
            );
         })}
-      </ul>
+      </div>
     );
   }
 
+  // Fallback for non-list text
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {lines.map((line, idx) => {
         const trimmed = line.trim();
-        // Handle basic list items even in mixed content
         if (trimmed.startsWith('- ') || trimmed.startsWith('• ')) {
            return (
-             <div key={idx} className="flex gap-2 items-start text-slate-700 leading-7 ml-2">
-               <span className="text-slate-400 mt-2.5 w-1 h-1 rounded-full bg-slate-400 shrink-0"></span>
+             <div key={idx} className="flex gap-2 items-start text-slate-700 leading-relaxed ml-2 text-lg">
+               <span className="text-slate-400 mt-3 w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span>
                <span>{trimmed.replace(/^[-•]\s+/, '')}</span>
              </div>
            );
         }
         return (
-          <div key={idx} className="leading-7 text-slate-700">
+          <div key={idx} className="leading-relaxed text-slate-700 text-lg">
              {line}
           </div>
         );
@@ -68,17 +122,21 @@ const FormattedText: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const ContentNodeItem: React.FC<{ node: ContentNode; palette: any }> = ({ node, palette }) => (
-  <div className="mb-6 last:mb-0 relative pl-4 border-l-2 border-slate-200 hover:border-slate-400 transition-colors">
-    <div className={`font-bold ${palette.text} mb-3 flex items-baseline gap-2 text-lg`}>
-       <span className="w-2 h-2 rounded-full bg-slate-400 shrink-0 self-center"></span>
-       {node.heading}
+const ContentNodeItem: React.FC<{ node: ContentNode; palette: any; index: number }> = ({ node, palette, index }) => {
+  // Zebra striping logic: Even index = transparent (or white), Odd index = pale color
+  const isOdd = index % 2 !== 0;
+  
+  return (
+    <div className={`p-6 md:p-8 rounded-2xl border transition-all ${isOdd ? 'bg-slate-50/80 border-slate-200' : 'bg-white border-slate-100'} hover:border-indigo-200 mb-6 last:mb-0`}>
+      <div className={`font-black ${palette.text} mb-4 flex items-baseline gap-3 text-2xl`}>
+         {node.heading}
+      </div>
+      <div className="text-lg text-justify">
+        <FormattedText text={node.text} />
+      </div>
     </div>
-    <div className="text-base text-justify">
-      <FormattedText text={node.text} />
-    </div>
-  </div>
-);
+  );
+};
 
 const SubSegmentNode: React.FC<{ sub: SubSegment; isLast: boolean; palette: any }> = ({ sub, isLast, palette }) => {
   const [isOpen, setIsOpen] = useState(true);
@@ -86,43 +144,43 @@ const SubSegmentNode: React.FC<{ sub: SubSegment; isLast: boolean; palette: any 
   return (
     <div className="relative pl-6 md:pl-8">
       {/* Vertical connector from parent */}
-      <div className={`absolute left-0 top-0 w-px bg-slate-200 ${isLast ? 'h-8' : 'h-full'}`}></div>
+      <div className={`absolute left-0 top-0 w-1 bg-slate-100 ${isLast ? 'h-10' : 'h-full'}`}></div>
       {/* Horizontal connector to node */}
-      <div className="absolute left-0 top-8 w-6 md:w-8 h-px bg-slate-200"></div>
+      <div className="absolute left-0 top-10 w-6 md:w-8 h-1 bg-slate-100"></div>
 
-      <div className="mb-8 group">
+      <div className="mb-10 group">
         {/* Node Header */}
         <div 
           onClick={() => setIsOpen(!isOpen)}
-          className={`bg-white border ${palette.border} rounded-xl p-4 shadow-sm hover:shadow-md transition-all cursor-pointer flex items-start gap-3 relative z-10`}
+          className={`bg-white border-2 ${palette.border} rounded-2xl p-5 shadow-sm hover:shadow-md transition-all cursor-pointer flex items-start gap-4 relative z-10`}
         >
-          <div className="mt-1 text-slate-400 group-hover:text-slate-600 transition-colors">
-            {isOpen ? <ChevronDown size={20} /> : <ChevronRight size={20} />}
+          <div className="mt-1.5 text-slate-400 group-hover:text-slate-600 transition-colors">
+            {isOpen ? <ChevronDown size={24} /> : <ChevronRight size={24} />}
           </div>
           
           <div className="flex-grow">
-            <h4 className={`font-bold ${palette.text} text-xl mb-1`}>{sub.title}</h4>
-            <p className="text-slate-500 text-sm">{sub.overview}</p>
+            <h4 className={`font-bold ${palette.text} text-2xl mb-2`}>{sub.title}</h4>
+            {sub.overview && <p className="text-slate-500 text-base font-medium">{sub.overview}</p>}
           </div>
         </div>
 
         {/* Node Content (Detailed) */}
         {isOpen && (
-          <div className="mt-4 ml-2 pl-4 md:pl-6 border-l-2 border-dashed border-slate-200 animate-in fade-in slide-in-from-top-2 duration-300">
+          <div className="mt-6 ml-3 pl-5 md:pl-7 border-l-2 border-dashed border-slate-200 animate-in fade-in slide-in-from-top-2 duration-300">
             
-            {/* Structured Content Nodes */}
-            <div className={`bg-white rounded-xl p-6 md:p-8 border ${palette.border} shadow-sm mb-6`}>
+            {/* Structured Content Nodes Container - Removed wrapper border to let zebra cards shine */}
+            <div className="space-y-4">
                {sub.content_nodes.map((node, i) => (
-                 <ContentNodeItem key={i} node={node} palette={palette} />
+                 <ContentNodeItem key={i} node={node} palette={palette} index={i} />
                ))}
             </div>
 
-            {/* Key Points */}
+            {/* Key Points - Rendered minimally as tags at bottom if they exist */}
             {sub.key_points && sub.key_points.length > 0 && (
-              <div className="mb-6 flex flex-wrap gap-2">
+              <div className="mt-8 mb-6 flex flex-wrap gap-3 opacity-90">
                  {sub.key_points.map((point, idx) => (
-                   <div key={idx} className={`${palette.bg} border ${palette.border} px-3 py-1.5 rounded-lg text-sm ${palette.text} font-medium flex items-center gap-1.5`}>
-                     <CheckCircle2 size={14} className={palette.icon} />
+                   <div key={idx} className={`bg-white border border-slate-200 px-4 py-2 rounded-full text-sm font-medium text-slate-600 flex items-center gap-2 shadow-sm`}>
+                     <Hash size={12} className="text-indigo-400" />
                      <span>{point}</span>
                    </div>
                  ))}
@@ -131,8 +189,8 @@ const SubSegmentNode: React.FC<{ sub: SubSegment; isLast: boolean; palette: any 
 
             {/* Original Snippet */}
             {sub.original_snippet && (
-              <div className="flex gap-3 text-slate-500 italic text-sm px-4 py-3 bg-slate-50 rounded-lg border border-slate-100">
-                <Quote size={14} className="shrink-0 mt-0.5" />
+              <div className="flex gap-4 text-slate-500 italic text-base px-6 py-5 bg-slate-50 rounded-xl border border-slate-200/60 mt-6">
+                <Quote size={20} className="shrink-0 mt-1 text-slate-300" />
                 <p>"{sub.original_snippet}"</p>
               </div>
             )}
@@ -148,11 +206,11 @@ const SegmentNode: React.FC<{ segment: Segment; index: number }> = ({ segment, i
   const palette = COLOR_PALETTES[index % COLOR_PALETTES.length];
 
   return (
-    <div className={`relative mb-12 rounded-3xl p-4 md:p-8 ${palette.bg} border ${palette.border}`}>
+    <div className={`relative mb-16 rounded-[2rem] p-6 md:p-10 ${palette.bg} border ${palette.border}`}>
       
       {/* Chapter Marker */}
-      <div className="absolute -left-3 md:-left-4 top-8">
-        <div className={`w-8 h-8 md:w-10 md:h-10 rounded-full ${palette.accent} border-2 border-white text-slate-700 flex items-center justify-center font-bold text-lg shadow-sm z-10`}>
+      <div className="absolute -left-4 md:-left-6 top-10">
+        <div className={`w-12 h-12 md:w-14 md:h-14 rounded-full ${palette.accent} border-4 border-white text-slate-700 flex items-center justify-center font-black text-2xl shadow-sm z-10`}>
           {index + 1}
         </div>
       </div>
@@ -160,23 +218,23 @@ const SegmentNode: React.FC<{ segment: Segment; index: number }> = ({ segment, i
       {/* Root Node (Segment Title) */}
       <div 
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-4 cursor-pointer group mb-8 ml-4 md:ml-6"
+        className="flex items-center gap-6 cursor-pointer group mb-10 ml-6 md:ml-8"
       >
-        <div className="flex-grow flex justify-between items-start md:items-center flex-col md:flex-row gap-2">
+        <div className="flex-grow flex justify-between items-start md:items-center flex-col md:flex-row gap-4">
           <div>
-            <h3 className={`text-3xl font-black ${palette.text} tracking-tight leading-tight`}>{segment.main_title}</h3>
-            <div className="flex items-center gap-3 mt-3 text-sm text-slate-600 font-medium opacity-80">
-              <span className="bg-white/60 px-2 py-0.5 rounded border border-black/5">依据: {segment.segmentation_reason}</span>
+            <h3 className={`text-4xl font-black ${palette.text} tracking-tight leading-tight`}>{segment.main_title}</h3>
+            <div className="flex items-center gap-4 mt-4 text-base text-slate-600 font-medium opacity-80">
+              <span className="bg-white/60 px-3 py-1 rounded-md border border-black/5 shadow-sm">依据: {segment.segmentation_reason}</span>
               {(segment.timestamp_start || segment.timestamp_end) && (
-                <span className="flex items-center gap-1">
-                  <Clock size={14} />
+                <span className="flex items-center gap-2 bg-white/40 px-3 py-1 rounded-md">
+                  <Clock size={16} />
                   {segment.timestamp_start || '00:00'} - {segment.timestamp_end || 'End'}
                 </span>
               )}
             </div>
           </div>
-          <div className={`${palette.text} opacity-50`}>
-             {isOpen ? <ChevronDown /> : <ChevronRight />}
+          <div className={`bg-white/50 p-2 rounded-full ${palette.text} opacity-60 hover:opacity-100 transition-opacity`}>
+             {isOpen ? <ChevronDown size={28} /> : <ChevronRight size={28} />}
           </div>
         </div>
       </div>
@@ -201,24 +259,24 @@ const SegmentNode: React.FC<{ segment: Segment; index: number }> = ({ segment, i
 const UnifiedMapRenderer: React.FC<UnifiedMapRendererProps> = ({ segments }) => {
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">
-       <div className="mb-16 text-center">
-           <div className="inline-flex items-center justify-center p-4 bg-indigo-50 rounded-full mb-6">
-             <BookOpen className="text-indigo-600 w-10 h-10" />
+       <div className="mb-20 text-center mt-8">
+           <div className="inline-flex items-center justify-center p-5 bg-indigo-50 rounded-full mb-8 shadow-sm">
+             <BookOpen className="text-indigo-600 w-12 h-12" />
            </div>
-           <h2 className="text-4xl font-black text-slate-800 tracking-tight">
+           <h2 className="text-5xl font-black text-slate-800 tracking-tight mb-4">
              全篇深度讲义
            </h2>
-           <p className="text-lg text-slate-500 mt-3">结构化重构 • 视觉清单 • 纯净文本</p>
+           <p className="text-xl text-slate-500 font-medium">结构化重构 • 视觉清单 • 纯净文本</p>
         </div>
         
-        <div className="space-y-8">
+        <div className="space-y-12">
           {segments.map((seg, idx) => (
             <SegmentNode key={seg.id || idx} segment={seg} index={idx} />
           ))}
         </div>
         
-        <div className="mt-16 text-center text-slate-400 text-sm">
-          <p>End of Tutorial</p>
+        <div className="mt-24 text-center text-slate-400 text-sm pb-10">
+          <p>Generated by Gemini Segment Master</p>
         </div>
     </div>
   );

@@ -27,6 +27,9 @@ export const splitTextIntoChunks = (text: string, chunkSize: number = 2400): str
   return chunks;
 };
 
+// Helper for delay
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 export const analyzeChunk = async (
   chunkText: string, 
   chunkIndex: number, 
@@ -36,8 +39,6 @@ export const analyzeChunk = async (
 ): Promise<ChunkAnalysisResult> => {
   const ai = getAiClient();
   // Using gemini-3-flash-preview as per guidelines for complex tasks (or when thinking is needed)
-  // Although 3-pro is better for reasoning, flash is faster for bulk processing.
-  // If thinkingBudget > 0, we can use 3-flash-preview which supports it.
   const modelId = "gemini-3-flash-preview"; 
 
   let prompt = `请深度重构以下文本片段 (第 ${chunkIndex + 1} 部分)。\n`;
@@ -110,38 +111,61 @@ export const analyzeChunk = async (
     config.thinkingConfig = { thinkingBudget: thinkingBudget };
   }
 
-  try {
-    const response = await ai.models.generateContent({
-      model: modelId,
-      contents: prompt,
-      config: config,
-    });
+  let retries = 0;
+  const maxRetries = 6; // Allow up to 6 retries for rate limits
+  let baseDelay = 5000; // Start with 5 seconds wait time
 
-    const responseText = response.text || "{}";
-    const data = JSON.parse(responseText);
+  while (true) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelId,
+        contents: prompt,
+        config: config,
+      });
 
-    return {
-      chunkIndex,
-      segments: data.segments || [],
-      raw_text: chunkText
-    };
+      const responseText = response.text || "{}";
+      const data = JSON.parse(responseText);
 
-  } catch (error) {
-    console.error(`Error analyzing chunk ${chunkIndex}:`, error);
-    return {
-      chunkIndex,
-      segments: [{
-        id: `error-${chunkIndex}`,
-        main_title: `分析失败 (Chunk ${chunkIndex + 1})`,
-        segmentation_reason: "API Error",
-        sub_segments: [{
-          title: "Error",
-          overview: "无法处理",
-          content_nodes: [{ heading: "Error", text: "- 错误：此部分处理失败\n- 建议：重试或检查 API Key 或降低思考预算" }],
-          key_points: []
+      return {
+        chunkIndex,
+        segments: data.segments || [],
+        raw_text: chunkText
+      };
+
+    } catch (error: any) {
+      const errorMsg = error.message || JSON.stringify(error);
+      const isRateLimit = errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota");
+      const isServerOverload = errorMsg.includes("503") || errorMsg.includes("Overloaded");
+
+      if ((isRateLimit || isServerOverload) && retries < maxRetries) {
+        retries++;
+        // Exponential backoff with jitter
+        const jitter = Math.random() * 1000;
+        const waitTime = (baseDelay * Math.pow(1.5, retries - 1)) + jitter; 
+        
+        console.warn(`Chunk ${chunkIndex} hit rate limit (${isRateLimit ? '429' : '503'}). Retrying in ${(waitTime/1000).toFixed(1)}s... (Attempt ${retries}/${maxRetries})`);
+        
+        await delay(waitTime);
+        continue;
+      }
+
+      console.error(`Error analyzing chunk ${chunkIndex} after ${retries} retries:`, error);
+      
+      return {
+        chunkIndex,
+        segments: [{
+          id: `error-${chunkIndex}`,
+          main_title: `分析失败 (Chunk ${chunkIndex + 1})`,
+          segmentation_reason: "API Error",
+          sub_segments: [{
+            title: "Error",
+            overview: "无法处理",
+            content_nodes: [{ heading: "Error", text: `- 错误类型：${isRateLimit ? 'API请求过多 (Rate Limit)' : '服务错误'}\n- 详情：${error.message}\n- 建议：系统已自动重试 ${retries} 次但未成功，请稍后重试。` }],
+            key_points: []
+          }]
         }]
-      }]
-    };
+      };
+    }
   }
 };
 
