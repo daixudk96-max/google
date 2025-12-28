@@ -8,7 +8,8 @@ const getAiClient = () => {
   return new GoogleGenAI({ apiKey: process.env.API_KEY });
 };
 
-export const splitTextIntoChunks = (text: string, chunkSize: number = 2400): string[] => {
+// Changed default chunk size to 3000
+export const splitTextIntoChunks = (text: string, chunkSize: number = 3000): string[] => {
   const chunks: string[] = [];
   let currentIndex = 0;
 
@@ -30,6 +31,107 @@ export const splitTextIntoChunks = (text: string, chunkSize: number = 2400): str
 // Helper for delay
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+/**
+ * Calculates the "Effective Content Length" of the generated segments.
+ * 
+ * METHODOLOGY:
+ * 1. Counts CHARACTERS (UTF-16 units), NOT Tokens.
+ * 2. Counts only the VALUES inside the JSON (titles, headings, text).
+ * 3. Does NOT count JSON syntax (braces, quotes, keys).
+ * 4. Trims whitespace to prevent "padding" with spaces.
+ */
+const calculateTotalContentLength = (segments: Segment[]): number => {
+  let total = 0;
+  if (!Array.isArray(segments)) return 0;
+  
+  for (const seg of segments) {
+    total += (seg.main_title?.trim().length || 0);
+    // segmentation_reason is meta-data, but it proves understanding, so we count it
+    total += (seg.segmentation_reason?.trim().length || 0); 
+
+    if (seg.sub_segments) {
+      for (const sub of seg.sub_segments) {
+         total += (sub.title?.trim().length || 0) + (sub.overview?.trim().length || 0);
+         if (sub.content_nodes) {
+            for (const node of sub.content_nodes) {
+               total += (node.heading?.trim().length || 0);
+               // The text body is the most important part
+               total += (node.text?.trim().length || 0);
+            }
+         }
+         if (sub.key_points) {
+            // Count key points content
+            total += sub.key_points.reduce((acc, curr) => acc + (curr?.trim().length || 0), 0);
+         }
+      }
+    }
+  }
+  return total;
+};
+
+// Helper: Attempt to repair truncated JSON
+const attemptJsonRepair = (jsonStr: string): any => {
+  let trimmed = jsonStr.trim();
+  if (!trimmed) return {};
+
+  // 1. Check if we are inside a string
+  let inString = false;
+  let isEscaped = false;
+  const stack: string[] = [];
+  
+  for (let i = 0; i < trimmed.length; i++) {
+    const char = trimmed[i];
+    
+    if (isEscaped) {
+      isEscaped = false;
+      continue;
+    }
+    
+    if (char === '\\') {
+      isEscaped = true;
+      continue;
+    }
+    
+    if (char === '"') {
+      inString = !inString;
+    }
+    
+    if (!inString) {
+      if (char === '{' || char === '[') {
+        stack.push(char);
+      } else if (char === '}') {
+        if (stack.length > 0 && stack[stack.length - 1] === '{') {
+          stack.pop();
+        }
+      } else if (char === ']') {
+        if (stack.length > 0 && stack[stack.length - 1] === '[') {
+          stack.pop();
+        }
+      }
+    }
+  }
+
+  // 2. If ended inside string, close it
+  if (inString) {
+    trimmed += '"';
+  }
+
+  // 3. Close remaining open structures
+  while (stack.length > 0) {
+    const open = stack.pop();
+    if (open === '{') trimmed += '}';
+    else if (open === '[') trimmed += ']';
+  }
+
+  try {
+    return JSON.parse(trimmed);
+  } catch (e) {
+    console.error("Failed to repair JSON:", e);
+    // If repair fails, throw original or new error to be caught by caller
+    throw new Error("JSON Repair Failed: " + (e instanceof Error ? e.message : String(e)));
+  }
+};
+
 export const analyzeChunk = async (
   chunkText: string, 
   chunkIndex: number, 
@@ -38,11 +140,18 @@ export const analyzeChunk = async (
   previousContextSummary?: string
 ): Promise<ChunkAnalysisResult> => {
   const ai = getAiClient();
-  // Using gemini-3-flash-preview as per guidelines for complex tasks (or when thinking is needed)
-  const modelId = "gemini-3-flash-preview"; 
+  // Confirmed: Using gemini-3-pro-preview for high complexity tasks
+  const modelId = "gemini-3-pro-preview"; 
 
   let prompt = `请深度重构以下文本片段 (第 ${chunkIndex + 1} 部分)。\n`;
-  prompt += `**核心要求**：严格遵循 System Instruction 中的定义，将内容重写为**思维导图节点（短语）**。\n`;
+  prompt += `**核心要求**：严格遵循 System Instruction 中的定义，将内容重写为**思维导图节点**。\n`;
+  
+  // Dynamic prompt based on input length
+  const inputLength = chunkText.length;
+  const expectedOutput = inputLength >= 2800 ? 2000 : Math.floor(inputLength * 0.6);
+  
+  prompt += `**字数目标 (Quality Gate)**：本片段输入长度为 ${inputLength} 字。要求你的**JSON有效内容输出字数至少达到 ${expectedOutput} 字**。请务必保留每一个细节，不要概括。\n`;
+  prompt += `**结尾完整性检查**：在输出前，务必检查输入文本的最后一句。如果该句包含重要信息或时间戳，**必须**将其包含在最后一个节点中，严禁在中间截断。\n`;
   
   if (previousContextSummary) {
     prompt += `**重要 - 上下文连续性**：\n`;
@@ -57,6 +166,7 @@ export const analyzeChunk = async (
   const config: any = {
     systemInstruction: systemPrompt,
     responseMimeType: "application/json",
+    maxOutputTokens: 8192, // Explicitly set to high limit to reduce truncation risk
     responseSchema: {
       type: Type.OBJECT,
       properties: {
@@ -112,8 +222,9 @@ export const analyzeChunk = async (
   }
 
   let retries = 0;
-  const maxRetries = 6; // Allow up to 6 retries for rate limits
-  let baseDelay = 5000; // Start with 5 seconds wait time
+  // Increased max retries to 10 to handle unstable network environments better
+  const maxRetries = 10; 
+  let baseDelay = 3000; 
 
   while (true) {
     try {
@@ -124,26 +235,98 @@ export const analyzeChunk = async (
       });
 
       const responseText = response.text || "{}";
-      const data = JSON.parse(responseText);
+      
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (e) {
+        console.warn(`Chunk ${chunkIndex} JSON parse failed (likely truncated). Attempting repair...`);
+        try {
+          data = attemptJsonRepair(responseText);
+          console.log(`Chunk ${chunkIndex} JSON repaired successfully.`);
+        } catch (repairError) {
+          console.error(`Chunk ${chunkIndex} JSON repair failed.`);
+          throw e; // Throw original error to trigger retry or fail state
+        }
+      }
+
+      const segmentsRaw = data.segments || [];
+
+      // --- QUALITY GATE: CONTENT LENGTH CHECK ---
+      const generatedLength = calculateTotalContentLength(segmentsRaw);
+      
+      // Determine threshold based on strict user requirements
+      // Rule: Input 3000 -> Output >= 2000. 
+      // Rule: General -> Output >= 60% of input.
+      let minThreshold = 0;
+      
+      if (inputLength >= 2800) {
+        // Strict user requirement for full chunks
+        minThreshold = 2000;
+      } else if (inputLength > 800) {
+        // Proportional requirement for partial chunks or smaller inputs
+        minThreshold = Math.floor(inputLength * 0.6);
+      }
+      
+      // If valid threshold exists and we failed it
+      if (minThreshold > 0 && generatedLength < minThreshold) {
+         throw new Error(`OUTPUT_TOO_SHORT: Input ${inputLength} chars -> Generated ${generatedLength} meaningful chars. (Required > ${minThreshold}). Triggering retry for more detail.`);
+      }
+      // ------------------------------------------
+
+      // Pre-process IDs to ensure uniqueness across chunks to prevent React key issues
+      const segments = segmentsRaw.map((seg: Segment, idx: number) => ({
+        ...seg,
+        id: seg.id || `chunk-${chunkIndex}-seg-${idx}-${Date.now()}`
+      }));
 
       return {
         chunkIndex,
-        segments: data.segments || [],
+        segments: segments,
         raw_text: chunkText
       };
 
     } catch (error: any) {
-      const errorMsg = error.message || JSON.stringify(error);
-      const isRateLimit = errorMsg.includes("429") || errorMsg.includes("RESOURCE_EXHAUSTED") || errorMsg.includes("quota");
-      const isServerOverload = errorMsg.includes("503") || errorMsg.includes("Overloaded");
+      // Normalize error message for easier matching
+      const errorMsg = (error.message || JSON.stringify(error)).toLowerCase();
 
-      if ((isRateLimit || isServerOverload) && retries < maxRetries) {
+      // 1. Rate Limits & Quotas
+      const isRateLimit = errorMsg.includes("429") || errorMsg.includes("resource_exhausted") || errorMsg.includes("quota");
+      
+      // 2. Server Errors (Overloaded / Internal / 500s)
+      // Including "500" specifically to catch "Rpc failed due to xhr error... error code: 6" which often manifests as 500 or XHR failures
+      const isServerSideError = errorMsg.includes("503") || errorMsg.includes("500") || errorMsg.includes("overloaded") || errorMsg.includes("internal server error");
+      
+      // 3. Data Processing Errors
+      const isJsonError = error instanceof SyntaxError || errorMsg.includes("json") || errorMsg.includes("syntax");
+      const isOutputShort = errorMsg.includes("output_too_short");
+      
+      // 4. Network / Transport Errors (Critical fix for the screenshot)
+      // "Rpc failed", "xhr error", "fetch failed", "network request failed"
+      const isNetworkError = errorMsg.includes("rpc failed") || 
+                             errorMsg.includes("xhr error") || 
+                             errorMsg.includes("fetch failed") || 
+                             errorMsg.includes("network error") ||
+                             errorMsg.includes("failed to fetch") ||
+                             errorMsg.includes("error code: 6"); // Chrome specific network error code
+
+      const shouldRetry = (isRateLimit || isServerSideError || isJsonError || isOutputShort || isNetworkError);
+
+      if (shouldRetry && retries < maxRetries) {
         retries++;
-        // Exponential backoff with jitter
-        const jitter = Math.random() * 1000;
-        const waitTime = (baseDelay * Math.pow(1.5, retries - 1)) + jitter; 
         
-        console.warn(`Chunk ${chunkIndex} hit rate limit (${isRateLimit ? '429' : '503'}). Retrying in ${(waitTime/1000).toFixed(1)}s... (Attempt ${retries}/${maxRetries})`);
+        let waitTime = 0;
+        
+        if (isOutputShort) {
+           // Short output errors don't need long backoff, just a retry
+           waitTime = 2000;
+           console.warn(`⚠️ [Quality Gate Failed] Chunk ${chunkIndex}: ${errorMsg}. Retrying (Attempt ${retries}/${maxRetries})...`);
+        } else {
+           // Exponential backoff for network/server errors
+           const jitter = Math.random() * 1000;
+           waitTime = (baseDelay * Math.pow(1.5, retries - 1)) + jitter; 
+           console.warn(`Chunk ${chunkIndex} hit retriable error: "${errorMsg}". Retrying in ${(waitTime/1000).toFixed(1)}s... (Attempt ${retries}/${maxRetries})`);
+        }
         
         await delay(waitTime);
         continue;
@@ -151,16 +334,20 @@ export const analyzeChunk = async (
 
       console.error(`Error analyzing chunk ${chunkIndex} after ${retries} retries:`, error);
       
+      // If we failed after all retries, return an error segment rather than crashing
       return {
         chunkIndex,
         segments: [{
           id: `error-${chunkIndex}`,
           main_title: `分析失败 (Chunk ${chunkIndex + 1})`,
-          segmentation_reason: "API Error",
+          segmentation_reason: "Processing Error",
           sub_segments: [{
-            title: "Error",
-            overview: "无法处理",
-            content_nodes: [{ heading: "Error", text: `- 错误类型：${isRateLimit ? 'API请求过多 (Rate Limit)' : '服务错误'}\n- 详情：${error.message}\n- 建议：系统已自动重试 ${retries} 次但未成功，请稍后重试。` }],
+            title: "Data Processing Error",
+            overview: "该片段数据处理失败，已达到最大重试次数。",
+            content_nodes: [{ 
+                heading: "Error Details", 
+                text: `- 错误信息：${error.message}\n- 可能原因：网络连接不稳定、API服务暂时过载或内容过长。\n- 建议：请检查网络连接后重试，或稍后再次上传。` 
+            }],
             key_points: []
           }]
         }]
@@ -175,21 +362,31 @@ const normalizeTitle = (str: string) => {
   return str.replace(/[^\p{L}\p{N}]/gu, '').toLowerCase();
 };
 
+// Calculate Jaccard Similarity (Character Set Overlap)
+// Returns 0 to 1
+const calculateSimilarity = (s1: string, s2: string) => {
+  if (!s1 || !s2) return 0;
+  const n1 = normalizeTitle(s1);
+  const n2 = normalizeTitle(s2);
+  
+  if (n1 === n2) return 1;
+  if (n1.includes(n2) || n2.includes(n1)) return 0.9;
+
+  const set1 = new Set(n1.split(''));
+  const set2 = new Set(n2.split(''));
+  
+  const intersection = new Set([...set1].filter(x => set2.has(x)));
+  const union = new Set([...set1, ...set2]);
+  
+  if (union.size === 0) return 0;
+  return intersection.size / union.size;
+};
+
 // Fuzzy match logic for titles
 const areTitlesSimilar = (t1: string, t2: string) => {
-  if (!t1 || !t2) return false;
-  const n1 = normalizeTitle(t1);
-  const n2 = normalizeTitle(t2);
-  
-  // 1. Exact match after normalization
-  if (n1 === n2) return true;
-  
-  // 2. Containment (e.g., "Source Logic" vs "Source Logic Continued")
-  // Only if length is substantial to avoid false positives on short words
-  if (n1.length > 4 && n2.includes(n1)) return true;
-  if (n2.length > 4 && n1.includes(n2)) return true;
-  
-  return false;
+  const score = calculateSimilarity(t1, t2);
+  // Threshold 0.6 means about 60% of characters are shared
+  return score > 0.6;
 };
 
 export const stitchResults = (results: ChunkAnalysisResult[]): Segment[] => {
@@ -204,9 +401,12 @@ export const stitchResults = (results: ChunkAnalysisResult[]): Segment[] => {
 
     // Check boundary: Last segment of Accumulated vs First segment of Next
     const lastSegment = finalSegments[finalSegments.length - 1];
+    
+    // We check the first segment of the new chunk
+    // Sometimes the AI generates a small "summary" segment first, so we might need to check the second one too, 
+    // but usually merging the first is sufficient if the prompt is followed.
     const firstSegmentOfNext = nextChunkSegments[0];
 
-    // Merge Logic: Use FUZZY MATCH instead of strict equality
     if (lastSegment && firstSegmentOfNext && areTitlesSimilar(lastSegment.main_title, firstSegmentOfNext.main_title)) {
        console.log(`Merging segments (fuzzy match): "${lastSegment.main_title}" + "${firstSegmentOfNext.main_title}"`);
        
@@ -224,7 +424,13 @@ export const stitchResults = (results: ChunkAnalysisResult[]): Segment[] => {
     }
 
     // Append the remaining segments from the next chunk
-    finalSegments = [...finalSegments, ...nextChunkSegments];
+    // Ensure we don't accidentally add another duplicate if the similarity check missed something obvious
+    // but the ID happens to be identical (unlikely with timestamp IDs, but good practice)
+    const uniqueNextSegments = nextChunkSegments.filter((ns: Segment) => 
+      !finalSegments.some(fs => fs.id === ns.id)
+    );
+
+    finalSegments = [...finalSegments, ...uniqueNextSegments];
   }
   
   return finalSegments;

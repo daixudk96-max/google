@@ -8,14 +8,38 @@ interface ResultDisplayProps {
   fileName: string;
 }
 
+// Helper to clean dirty timestamps like "00:05_20250101..." to just "00:05"
+const cleanTimestamp = (ts?: string) => {
+  if (!ts) return '';
+  
+  // 1. If it contains an underscore (common in filenames), split it and take the first part
+  let cleaned = ts.split('_')[0];
+
+  // 2. Try to extract standard time formats like 00:00 or 00:00:00
+  const timeMatch = cleaned.match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
+  if (timeMatch) {
+    return timeMatch[0];
+  }
+
+  // 3. Fallback: if it's still too long, truncate it
+  return cleaned.length > 20 ? cleaned.substring(0, 8) : cleaned;
+};
+
 const ResultDisplay: React.FC<ResultDisplayProps> = ({ segments, fileName }) => {
   if (!segments || segments.length === 0) return null;
 
   const downloadMarkdown = () => {
-    let content = `# ${fileName} - 详细教程\n\n`;
+    let content = `# ${fileName} - 深度拆解教程\n\n`;
     segments.forEach((seg, i) => {
       content += `## ${i + 1}. ${seg.main_title}\n`;
-      if (seg.timestamp_start) content += `> 时间戳: ${seg.timestamp_start} - ${seg.timestamp_end}\n`;
+      
+      // Clean timestamps before writing
+      const start = cleanTimestamp(seg.timestamp_start);
+      const end = cleanTimestamp(seg.timestamp_end);
+      
+      if (start) {
+        content += `> ⏱️ 时间戳: ${start}${end ? ` - ${end}` : ''}\n`;
+      }
       content += `\n`;
       
       seg.sub_segments.forEach(sub => {
@@ -150,7 +174,11 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ segments, fileName }) => 
   <body>
 `;
     segments.forEach(seg => {
-      opml += `    <outline text="${escapeXml(seg.main_title)}" >\n`;
+      // Clean timestamp for OPML too
+      const start = cleanTimestamp(seg.timestamp_start);
+      const timeStr = start ? ` [${start}]` : '';
+
+      opml += `    <outline text="${escapeXml(seg.main_title + timeStr)}" >\n`;
       seg.sub_segments.forEach(sub => {
         // Sub-segment is a node
         opml += `      <outline text="${escapeXml(sub.title)}" _note="${escapeXml(sub.overview)}">\n`;

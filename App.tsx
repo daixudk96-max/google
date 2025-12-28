@@ -25,13 +25,13 @@ const App: React.FC = () => {
     setProcessingState({ status: 'chunking', currentChunk: 0, totalChunks: 0, message: '正在切片文本...' });
 
     try {
-      // 1. Chunking (2400 chars per chunk for higher granularity)
-      const chunks = splitTextIntoChunks(content, 2400);
+      // 1. Chunking (3000 chars per chunk)
+      const chunks = splitTextIntoChunks(content, 3000);
       setProcessingState({ 
         status: 'analyzing', 
         currentChunk: 0, 
         totalChunks: chunks.length,
-        message: `准备处理 ${chunks.length} 个切片...`
+        message: `准备处理 ${chunks.length} 个精细切片...`
       });
 
       const results: ChunkAnalysisResult[] = [];
@@ -42,7 +42,7 @@ const App: React.FC = () => {
         setProcessingState(prev => ({
           ...prev,
           currentChunk: i + 1,
-          message: `正在进行深度解析切片 ${i + 1} / ${chunks.length} ${thinkingBudget > 0 ? '(深度思考中...)' : ''}...`
+          message: `正在深度解析切片 ${i + 1} / ${chunks.length} (约3000字) ${thinkingBudget > 0 ? '(深度思考中...)' : ''}...`
         }));
 
         // Pass systemPrompt and thinkingBudget from state
@@ -94,7 +94,7 @@ const App: React.FC = () => {
               <BrainCircuit className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600">
-              Gemini 深度脑图工坊
+              Gemini 深度脑图工坊 (Pro Edition)
             </h1>
           </div>
           <div className="flex items-center gap-3">
@@ -106,7 +106,7 @@ const App: React.FC = () => {
                Gem 配置
              </button>
              <div className="text-sm text-slate-500 hidden sm:block font-medium pl-3 border-l border-slate-200">
-              Gemini 3 Flash
+              Gemini 3 Pro
              </div>
           </div>
         </div>
@@ -173,7 +173,7 @@ const App: React.FC = () => {
                      />
                      <p className="text-xs text-slate-500 mt-2">
                        {thinkingBudget === 0 
-                         ? '已关闭。适合快速生成，响应速度最快。' 
+                         ? '已关闭。适合快速生成。' 
                          : '已开启深度思考。AI 将在生成回答前进行逻辑推理 (Gemini 3.0 特性)，会增加等待时间但提升准确率。'}
                      </p>
                    </div>
@@ -181,9 +181,9 @@ const App: React.FC = () => {
                    <div className="bg-amber-50 border border-amber-100 p-4 rounded-lg">
                       <h4 className="text-sm font-bold text-amber-800 mb-1">提示技巧</h4>
                       <ul className="text-xs text-amber-700 space-y-1 list-disc pl-4">
-                        <li>保留 <b>NO DUNHAO</b> 指令以确保导图格式正确。</li>
-                        <li>保留 <b>Content Node 格式规范</b> 以确保渲染器能识别。</li>
-                        <li>增加“思考预算”可显著提升复杂逻辑归纳的效果。</li>
+                        <li>保留 <b>绝对禁止行内并列</b> 指令。</li>
+                        <li>当前设定：<b>3000字切片 / 2000+字输出</b>。</li>
+                        <li>保留 <b>时间戳强制提取</b> 和 <b>结尾检查</b> 指令。</li>
                       </ul>
                    </div>
                 </div>
@@ -217,7 +217,7 @@ const App: React.FC = () => {
             )}
             
             <p className="text-base text-slate-500 mt-6 font-medium">
-              AI 正在执行工作流：{thinkingBudget > 0 ? '深度推理' : '快速分析'} -> 逻辑拆解 -> 结构重组
+              AI 正在执行工作流：{thinkingBudget > 0 ? '深度推理' : '全量分析'} -> 逻辑拆解 -> 结构重组
             </p>
           </div>
         )}

@@ -16,6 +16,20 @@ const COLOR_PALETTES = [
   { bg: 'bg-cyan-50', border: 'border-cyan-200', text: 'text-cyan-900', accent: 'bg-cyan-100', icon: 'text-cyan-600' },
 ];
 
+const cleanTimestamp = (ts?: string) => {
+  if (!ts) return null;
+  
+  // 1. Split by underscore to handle "00:05_2025..." format
+  let cleaned = ts.split('_')[0];
+
+  // 2. Extract standard time pattern
+  const timeMatch = cleaned.match(/(\d{1,2}:\d{2}(?::\d{2})?)/);
+  if (timeMatch) return timeMatch[0];
+  
+  // 3. Fallback truncation
+  return cleaned.length > 10 ? cleaned.substring(0, 8) : cleaned;
+};
+
 const FormattedText: React.FC<{ text: string }> = ({ text }) => {
   // Strip bold markdown just in case to avoid double styling
   const cleanText = text.replace(/\*\*/g, '');
@@ -205,6 +219,9 @@ const SegmentNode: React.FC<{ segment: Segment; index: number }> = ({ segment, i
   const [isOpen, setIsOpen] = useState(true);
   const palette = COLOR_PALETTES[index % COLOR_PALETTES.length];
 
+  const startTime = cleanTimestamp(segment.timestamp_start);
+  const endTime = cleanTimestamp(segment.timestamp_end);
+
   return (
     <div className={`relative mb-16 rounded-[2rem] p-6 md:p-10 ${palette.bg} border ${palette.border}`}>
       
@@ -218,24 +235,31 @@ const SegmentNode: React.FC<{ segment: Segment; index: number }> = ({ segment, i
       {/* Root Node (Segment Title) */}
       <div 
         onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-6 cursor-pointer group mb-10 ml-6 md:ml-8"
+        className="flex items-start gap-6 cursor-pointer group mb-10 ml-6 md:ml-8"
       >
-        <div className="flex-grow flex justify-between items-start md:items-center flex-col md:flex-row gap-4">
-          <div>
-            <h3 className={`text-4xl font-black ${palette.text} tracking-tight leading-tight`}>{segment.main_title}</h3>
-            <div className="flex items-center gap-4 mt-4 text-base text-slate-600 font-medium opacity-80">
-              <span className="bg-white/60 px-3 py-1 rounded-md border border-black/5 shadow-sm">依据: {segment.segmentation_reason}</span>
-              {(segment.timestamp_start || segment.timestamp_end) && (
-                <span className="flex items-center gap-2 bg-white/40 px-3 py-1 rounded-md">
+        <div className="flex-grow w-full">
+            <h3 className={`text-3xl md:text-4xl font-black ${palette.text} tracking-tight leading-tight mb-4`}>{segment.main_title}</h3>
+            
+            {/* Metadata Section - Optimized Layout */}
+            <div className="flex flex-col md:flex-row md:items-start gap-3 text-base text-slate-600 font-medium opacity-80">
+              <div className="flex-grow bg-white/60 px-4 py-3 rounded-lg border border-black/5 shadow-sm">
+                 <span className="font-bold text-slate-700 block mb-1 text-xs uppercase tracking-wider">划分依据</span>
+                 <span className="leading-relaxed text-sm block">{segment.segmentation_reason}</span>
+              </div>
+              
+              {(startTime || endTime) && (
+                <div className="flex items-center gap-2 bg-white/40 px-3 py-2 rounded-lg border border-transparent shrink-0 self-start md:self-auto">
                   <Clock size={16} />
-                  {segment.timestamp_start || '00:00'} - {segment.timestamp_end || 'End'}
-                </span>
+                  <span className="whitespace-nowrap text-sm font-mono" title={`${segment.timestamp_start} - ${segment.timestamp_end}`}>
+                    {startTime || '00:00'} - {endTime || 'End'}
+                  </span>
+                </div>
               )}
             </div>
-          </div>
-          <div className={`bg-white/50 p-2 rounded-full ${palette.text} opacity-60 hover:opacity-100 transition-opacity`}>
-             {isOpen ? <ChevronDown size={28} /> : <ChevronRight size={28} />}
-          </div>
+        </div>
+        
+        <div className={`bg-white/50 p-2 rounded-full ${palette.text} opacity-60 hover:opacity-100 transition-opacity shrink-0 mt-2`}>
+           {isOpen ? <ChevronDown size={28} /> : <ChevronRight size={28} />}
         </div>
       </div>
 
